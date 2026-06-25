@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+target_dir="$HOME/.local/share/gnome-shell/extensions/copilot-usage@davidpcls"
+
+if [ "$repo_dir" = "$target_dir" ]; then
+	echo "Refusing to deploy from the installed extension directory"
+	exit 1
+fi
+
+rm -rf "$target_dir"
+cp -r "$repo_dir" "$target_dir"
+cd "$target_dir/schemas"
+glib-compile-schemas .
+gnome-session-quit --no-prompt

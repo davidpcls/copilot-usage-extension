@@ -1,0 +1,133 @@
+/* Panel button styles */
+.copilot-icon {
+    margin-right: 6px;
+}
+
+.copilot-usage-label {
+    font-size: 12px;
+    font-weight: bold;
+}
+
+/* Panel progress bar */
+.copilot-panel-progress-bg {
+    background-color: rgba(255, 255, 255, 0.2);
+    border-radius: 3px;
+    height: 10px;
+    width: 50px;
+    margin-left: 4px;
+}
+
+.copilot-panel-progress-bar {
+    height: 10px;
+    border-radius: 3px;
+    transition: width 300ms ease-out;
+    background-color: #ffffff;
+}
+
+/* Usage section styles */
+.copilot-usage-section {
+    padding: 4px 0;
+    spacing: 6px;
+    min-width: 260px;
+}
+
+.copilot-section-header {
+    spacing: 12px;
+}
+
+.copilot-section-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #e0e0e0;
+}
+
+.copilot-value-label {
+    font-size: 13px;
+    font-weight: bold;
+    color: #ffffff;
+}
+
+.copilot-detail-label {
+    font-size: 11px;
+    color: #a0a0a0;
+}
+
+/* Progress bar styles */
+.copilot-progress-bg {
+    background-color: rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+    height: 8px;
+    width: 240px;
+    margin: 4px 0;
+}
+
+.copilot-progress-bar {
+    height: 8px;
+    border-radius: 4px;
+    transition: width 300ms ease-out;
+}
+
+.copilot-progress-bar.usage-low {
+    background-color: #10a37f;
+}
+
+.copilot-progress-bar.usage-medium {
+    background-color: #eab308;
+}
+
+.copilot-progress-bar.usage-high {
+    background-color: #f97316;
+}
+
+.copilot-progress-bar.usage-critical {
+    background-color: #ef4444;
+}
+
+/* Footer styles */
+.copilot-footer-box {
+    padding: 4px 0 2px;
+    spacing: 10px;
+}
+
+.copilot-refresh-button-content {
+    spacing: 6px;
+}
+
+.copilot-refresh-button-icon {
+    icon-size: 14px;
+}
+
+.copilot-refresh-button-label {
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.copilot-refresh-button {
+    padding: 6px 10px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background-color: rgba(255, 255, 255, 0.06);
+    color: #ffffff;
+    transition: background-color 160ms ease-out, border-color 160ms ease-out;
+}
+
+.copilot-refresh-button:hover {
+    background-color: rgba(255, 255, 255, 0.12);
+    border-color: rgba(255, 255, 255, 0.18);
+}
+
+.copilot-refresh-button:active {
+    background-color: rgba(255, 255, 255, 0.18);
+}
+
+.copilot-refresh-button.busy {
+    background-color: rgba(16, 163, 127, 0.18);
+    border-color: rgba(16, 163, 127, 0.34);
+}
+
+.copilot-last-updated-label {
+    font-size: 10px;
+    font-style: italic;
+    color: #808080;
+    text-align: right;
+}
