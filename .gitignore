@@ -1,3 +1,5 @@
 *.compiled
 /.copilot
 /.direnv
+/dist/
+/*.shell-extension.zip

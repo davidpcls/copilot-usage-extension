@@ -1,107 +1,119 @@
 # Copilot Usage GNOME Extension
 
-Display GitHub Copilot usage in the GNOME Shell top panel.
+Display GitHub Copilot premium interactions usage in the GNOME Shell top panel.
 
 > Derived from [claude-usage-extension](https://github.com/Haletran/claude-usage-extension) and [codex-usage-extension](https://github.com/kevinpita/codex-usage-extension).
 
-## What It Shows
+## Features
 
-- Shows premium interactions usage in the top panel
-- Uses Copilot quota data from `GET /copilot_internal/user`
-- Displays used credits, remaining credits, reset date, and last refresh time in the dropdown
-- Handles unlimited plans explicitly
-- Supports text, progress bar, or both
-- Includes configurable refresh interval, optional icon visibility/style, optional percentage display, and optional token quantity display
+- Fetches usage data from `GET https://api.github.com/copilot_internal/user`
+- Shows used credits, remaining credits, reset date, and refresh time
+- Supports finite and unlimited plans
+- Supports panel display modes: text, progress bar, or both
+- Stores GitHub token in login keyring (libsecret), not plaintext settings
 
-Display options:
-- `Show Token Quantities` ON + `Show Percentage` OFF: shows `used/total`
-- `Show Token Quantities` ON + `Show Percentage` ON: shows `used/total (percent)`
-- `Show Token Quantities` OFF + `Show Percentage` ON: shows `percent`
-- `Show Token Quantities` OFF + `Show Percentage` OFF: shows `Copilot`
+Panel label combinations:
+- `Show Token Quantities` ON + `Show Percentage` OFF -> `used/total`
+- `Show Token Quantities` ON + `Show Percentage` ON -> `used/total (percent)`
+- `Show Token Quantities` OFF + `Show Percentage` ON -> `percent`
+- `Show Token Quantities` OFF + `Show Percentage` OFF -> `Copilot`
 
 ## Requirements
 
-- GNOME Shell 45, 46, 47, 48, 49, 50, or 51
-- A GitHub API token entered in extension settings (stored in your login keyring via libsecret)
-- GitHub account with Copilot access and quota data available from `/copilot_internal/user`
+- GNOME Shell 45-51
+- GitHub account with Copilot entitlement/quota available from `/copilot_internal/user`
+- A GitHub token saved in extension preferences
 
-## Create a GitHub API token
+## Repository Layout
 
-Use a token that can read Copilot entitlement/quota data from `/copilot_internal/user`.
-
-1. Open `https://github.com/settings/tokens`.
-2. Click `Generate new token` -> `Generate new token (classic)`.
-3. Give it a note like `GNOME Copilot Usage` and choose an expiration.
-4. Start with minimal scopes and expand only if needed.
-5. Click `Generate token`, then copy the token immediately.
-6. Open this extension's preferences and paste it into `GitHub API Token`.
-
-The token is saved to your GNOME login keyring (libsecret) with the label `GNOME Extension: Copilot Usage API Token`. The extension no longer reads tokens from GitHub CLI.
-
-Tip: paste only the raw token value (for example `github_pat_...`), not `Bearer ...`.
-
-If the extension shows `Token is not allowed to read Copilot quota`, create a token with appropriate Copilot/API access for your account.
-
-## Installation
-
-### Quick Deploy
-
-From the `copilot-usage-extension` directory:
-
-```bash
-./update
-```
-
-The script copies this extension to:
+The repository keeps runtime extension files at the root (GNOME extension convention), and developer tooling in `scripts/`.
 
 ```text
-${XDG_DATA_HOME:-~/.local/share}/gnome-shell/extensions/copilot-usage@davidpcls
+.
+├── metadata.json
+├── extension.js
+├── prefs.js
+├── ui.js
+├── api.js
+├── auth.js
+├── quota.js
+├── stylesheet.css
+├── github-copilot-icon.svg
+├── schemas/
+│   └── org.gnome.shell.extensions.copilot-usage.gschema.xml
+└── scripts/
+    ├── deploy-local.sh
+    ├── build-package.sh
+    └── validate.sh
 ```
 
-It recompiles the GSettings schema, then tries to discover and enable the extension automatically.
+## Token Setup
 
-If GNOME Shell has not discovered it yet, reload Shell and then enable:
+Use a token that can read Copilot quota data from `/copilot_internal/user`.
 
-```bash
-gnome-extensions enable copilot-usage@davidpcls
-```
+1. Open `https://github.com/settings/tokens`.
+2. Create a token (classic or fine-grained) with minimum required access.
+3. Copy the raw token value.
+4. Open extension preferences and paste it into `GitHub API Token`.
 
-### Manual Installation
+The extension stores the token in your login keyring with label `GNOME Extension: Copilot Usage API Token`.
 
-From the `copilot-usage-extension` directory:
+## Development Workflow
+
+From the repository root:
+
+1. Validate metadata/schema:
+
+   ```bash
+   ./scripts/validate.sh
+   ```
+
+2. Deploy locally for live testing:
+
+   ```bash
+   ./scripts/deploy-local.sh
+   ```
+
+3. Build a distributable zip package:
+
+   ```bash
+   ./scripts/build-package.sh
+   ```
+
+The package is created at `dist/copilot-usage@davidpcls.shell-extension.zip`.
+
+## Manual Install (without scripts)
 
 ```bash
 data_home="${XDG_DATA_HOME:-$HOME/.local/share}"
 install_dir="$data_home/gnome-shell/extensions/copilot-usage@davidpcls"
 
 rm -rf "$install_dir"
-mkdir -p "$(dirname "$install_dir")"
-cp -rT "$PWD" "$install_dir"
+mkdir -p "$install_dir/schemas"
+cp metadata.json extension.js prefs.js ui.js api.js auth.js quota.js stylesheet.css github-copilot-icon.svg LICENSE "$install_dir"
+cp schemas/org.gnome.shell.extensions.copilot-usage.gschema.xml "$install_dir/schemas"
 glib-compile-schemas "$install_dir/schemas"
 gnome-extensions enable copilot-usage@davidpcls
 ```
 
-Reload GNOME Shell after installation:
-
-- X11: press `Alt+F2`, type `r`, then press Enter
+If GNOME Shell has not discovered the extension yet:
+- X11: press `Alt+F2`, type `r`, press Enter
 - Wayland: log out and log back in
 
-## Notes
+## Packaging and Maintenance Notes
 
-- Authentication uses only the token stored in your login keyring.
-- On first run after upgrade, a legacy plaintext token from settings is migrated to keyring storage and then cleared.
-- Usage data is fetched only from `https://api.github.com/copilot_internal/user`.
-- The extension reads `quota_snapshots.premium_interactions` and computes `used = entitlement - remaining`.
-- If quota is unavailable in API responses, the extension falls back to limited status text.
+- Do not commit `schemas/gschemas.compiled` (generated file)
+- Do not include development files (`.git/`, `.direnv/`, `dist/`) in extension packages
+- Keep `metadata.json` `shell-version` aligned with tested GNOME Shell versions
+- Keep legacy schema keys only when needed for safe upgrades in running sessions
 
 ## Troubleshooting
 
-- `Auth` in panel: open extension settings and save a valid GitHub API token.
-- `Keyring unavailable...`: unlock your login keyring, then save the token again.
-- `Token is not allowed to read Copilot quota`: use a token/account with access to `/copilot_internal/user`.
-- `Copilot quota endpoint unavailable for this account`: Copilot entitlement/quota may not be available for this account or host.
-- `Extension ... does not exist`: reload GNOME Shell first (X11: `Alt+F2`, `r`; Wayland: log out/in), then run `gnome-extensions enable copilot-usage@davidpcls`.
-- Extension still missing: ensure your GNOME Shell major version is listed in `metadata.json` under `shell-version`.
+- `Auth` in panel: save a valid GitHub token in preferences
+- `Keyring unavailable...`: unlock login keyring and save token again
+- `Token is not allowed to read Copilot quota`: use a token/account allowed to access `/copilot_internal/user`
+- `Copilot quota endpoint unavailable for this account`: entitlement/quota may not be exposed for this account
+- Extension not found: reload GNOME Shell, then run `gnome-extensions enable copilot-usage@davidpcls`
 
 ## Disclaimer
 

@@ -2,12 +2,26 @@
 
 set -euo pipefail
 
-repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 data_home="${XDG_DATA_HOME:-$HOME/.local/share}"
 extensions_dir="$data_home/gnome-shell/extensions"
 uuid="copilot-usage@davidpcls"
 target_dir="$extensions_dir/$uuid"
-metadata_file="$repo_dir/metadata.json"
+
+extension_files=(
+	"metadata.json"
+	"extension.js"
+	"prefs.js"
+	"ui.js"
+	"api.js"
+	"auth.js"
+	"quota.js"
+	"stylesheet.css"
+	"github-copilot-icon.svg"
+	"LICENSE"
+)
+
+schema_file="org.gnome.shell.extensions.copilot-usage.gschema.xml"
 
 if [ "$repo_dir" = "$target_dir" ]; then
 	echo "Refusing to deploy from the installed extension directory"
@@ -16,7 +30,14 @@ fi
 
 mkdir -p "$extensions_dir"
 rm -rf "$target_dir"
-cp -r "$repo_dir" "$target_dir"
+
+mkdir -p "$target_dir"
+for file in "${extension_files[@]}"; do
+	cp "$repo_dir/$file" "$target_dir/$file"
+done
+
+mkdir -p "$target_dir/schemas"
+cp "$repo_dir/schemas/$schema_file" "$target_dir/schemas/$schema_file"
 glib-compile-schemas "$target_dir/schemas"
 
 # Backward compatibility for live GNOME Shell sessions that may still have
@@ -40,7 +61,7 @@ if command -v gnome-shell >/dev/null 2>&1; then
 	fi
 fi
 
-if [ -n "$shell_major" ] && ! grep -q "\"$shell_major\"" "$metadata_file"; then
+if [ -n "$shell_major" ] && ! grep -q "\"$shell_major\"" "$repo_dir/metadata.json"; then
 	echo "Warning: metadata.json does not list GNOME Shell $shell_major in shell-version."
 	echo "The extension may stay hidden until shell-version includes $shell_major."
 fi
