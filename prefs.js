@@ -3,10 +3,12 @@ import Gtk from 'gi://Gtk';
 import Gio from 'gi://Gio';
 
 import {ExtensionPreferences} from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
+import {TokenStore} from './auth.js';
 
 export default class CopilotUsagePreferences extends ExtensionPreferences {
     fillPreferencesWindow(window) {
         const settings = this.getSettings();
+        const tokenStore = new TokenStore();
 
         const page = new Adw.PreferencesPage({
             title: 'Copilot Usage Settings',
@@ -24,7 +26,7 @@ export default class CopilotUsagePreferences extends ExtensionPreferences {
             title: 'Refresh Interval',
             subtitle: 'How often to refresh usage data (in seconds)',
             adjustment: new Gtk.Adjustment({
-                lower: 10,
+                lower: 5,
                 upper: 600,
                 step_increment: 10,
                 page_increment: 60,
@@ -100,49 +102,97 @@ export default class CopilotUsagePreferences extends ExtensionPreferences {
         );
         displayGroup.add(showIconRow);
 
-        const networkGroup = new Adw.PreferencesGroup({
-            title: 'Network',
-            description: 'Configure network settings',
+        const showPercentageRow = new Adw.SwitchRow({
+            title: 'Show Percentage',
+            subtitle: 'Append used percentage next to used/total text when quota is finite',
         });
-        page.add(networkGroup);
-
-        const proxyRow = new Adw.EntryRow({
-            title: 'Proxy URL',
-            show_apply_button: true,
-        });
-        proxyRow.set_text(settings.get_string('proxy-url'));
-        proxyRow.connect('apply', () => {
-            settings.set_string('proxy-url', proxyRow.get_text());
-        });
-        networkGroup.add(proxyRow);
-
-        const proxyHint = new Gtk.Label({
-            label: 'Example: http://localhost:11809 (leave empty for no proxy)',
-            xalign: 0,
-            css_classes: ['dim-label', 'caption'],
-            margin_start: 12,
-            margin_top: 4,
-        });
-        networkGroup.add(proxyHint);
+        settings.bind(
+            'show-percentage',
+            showPercentageRow,
+            'active',
+            Gio.SettingsBindFlags.DEFAULT
+        );
+        displayGroup.add(showPercentageRow);
 
         const authGroup = new Adw.PreferencesGroup({
             title: 'Authentication',
-            description: 'Use either a manual token or your local GitHub CLI credentials',
+            description: 'Store your API token securely in the login keyring',
         });
         page.add(authGroup);
 
         const tokenRow = new Adw.EntryRow({
             title: 'GitHub API Token',
+            show_apply_button: true,
         });
         tokenRow.set_input_purpose(Gtk.InputPurpose.PASSWORD);
-        tokenRow.set_text(settings.get_string('api-token'));
-        tokenRow.connect('notify::text', () => {
-            settings.set_string('api-token', tokenRow.get_text().trim());
+        tokenRow.set_text('');
+
+        const tokenStatusLabel = new Gtk.Label({
+            xalign: 0,
+            wrap: true,
+            css_classes: ['dim-label', 'caption'],
+            margin_start: 12,
+            margin_top: 4,
         });
+
+        const updateTokenStatus = (override = null) => {
+            if (typeof override === 'string') {
+                tokenStatusLabel.set_label(override);
+                return;
+            }
+
+            tokenStatusLabel.set_label(tokenStore.hasStoredToken()
+                ? 'Token stored in login keyring'
+                : 'No token stored in login keyring');
+        };
+
+        tokenRow.connect('apply', () => {
+            const value = tokenRow.get_text().trim();
+            let success = false;
+            try {
+                if (value === '') {
+                    tokenStore.clearToken();
+                } else {
+                    tokenStore.storeToken(value);
+                }
+                success = true;
+            } catch (e) {
+                updateTokenStatus('Failed to store token. Unlock login keyring and try again');
+            }
+
+            tokenRow.set_text('');
+            if (success) {
+                updateTokenStatus();
+            }
+        });
+        updateTokenStatus();
         authGroup.add(tokenRow);
+        authGroup.add(tokenStatusLabel);
+
+        const clearTokenRow = new Adw.ActionRow({
+            title: 'Clear Stored Token',
+            subtitle: 'Remove token from your login keyring',
+        });
+        const clearTokenButton = new Gtk.Button({
+            label: 'Clear',
+            valign: Gtk.Align.CENTER,
+            css_classes: ['destructive-action'],
+        });
+        clearTokenButton.connect('clicked', () => {
+            try {
+                tokenStore.clearToken();
+            } catch (e) {
+                updateTokenStatus('Failed to clear token from keyring');
+                return;
+            }
+            tokenRow.set_text('');
+            updateTokenStatus();
+        });
+        clearTokenRow.add_suffix(clearTokenButton);
+        authGroup.add(clearTokenRow);
 
         const authHint = new Gtk.Label({
-            label: 'Leave token empty to use gh auth. The token/account must be able to read /copilot_internal/user.',
+            label: 'Token is stored in your login keyring (libsecret), not plaintext settings. Existing legacy tokens in settings are migrated automatically and then cleared.',
             xalign: 0,
             wrap: true,
             css_classes: ['dim-label', 'caption'],

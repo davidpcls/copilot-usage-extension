@@ -11,12 +11,12 @@ Display GitHub Copilot usage in the GNOME Shell top panel.
 - Displays used credits, total credits, remaining credits, reset date, and last refresh time in the dropdown
 - Handles unlimited plans explicitly
 - Supports text, progress bar, or both
-- Includes configurable refresh interval, icon style, and optional HTTP proxy
+- Includes configurable refresh interval, icon style, and optional percentage display
 
 ## Requirements
 
 - GNOME Shell 45, 46, 47, 48, 49, 50, or 51
-- Either a GitHub API token entered in extension settings, or GitHub CLI (`gh`) installed and authenticated with `gh auth login --hostname github.com`
+- A GitHub API token entered in extension settings (stored in your login keyring via libsecret)
 - GitHub account with Copilot access and quota data available from `/copilot_internal/user`
 
 ## Create a GitHub API token
@@ -29,6 +29,8 @@ Use a token that can read Copilot entitlement/quota data from `/copilot_internal
 4. Start with minimal scopes and expand only if needed.
 5. Click `Generate token`, then copy the token immediately.
 6. Open this extension's preferences and paste it into `GitHub API Token`.
+
+The token is saved to your GNOME login keyring (libsecret) with the label `GNOME Extension: Copilot Usage API Token`. The extension no longer reads tokens from GitHub CLI.
 
 Tip: paste only the raw token value (for example `github_pat_...`), not `Bearer ...`.
 
@@ -80,15 +82,16 @@ Reload GNOME Shell after installation:
 
 ## Notes
 
-- If `GitHub API Token` is set in preferences, that token is used first.
-- If token is empty, authentication is read from GitHub CLI credentials (`~/.config/gh/hosts.yml`, then `gh auth token`).
+- Authentication uses only the token stored in your login keyring.
+- On first run after upgrade, a legacy plaintext token from settings is migrated to keyring storage and then cleared.
 - Usage data is fetched only from `https://api.github.com/copilot_internal/user`.
 - The extension reads `quota_snapshots.premium_interactions` and computes `used = entitlement - remaining`.
 - If quota is unavailable in API responses, the extension falls back to limited status text.
 
 ## Troubleshooting
 
-- `Auth` in panel: set a valid GitHub API token in extension settings, or install GitHub CLI and run `gh auth login --hostname github.com`.
+- `Auth` in panel: open extension settings and save a valid GitHub API token.
+- `Keyring unavailable...`: unlock your login keyring, then save the token again.
 - `Token is not allowed to read Copilot quota`: use a token/account with access to `/copilot_internal/user`.
 - `Copilot quota endpoint unavailable for this account`: Copilot entitlement/quota may not be available for this account or host.
 - `Extension ... does not exist`: reload GNOME Shell first (X11: `Alt+F2`, `r`; Wayland: log out/in), then run `gnome-extensions enable copilot-usage@davidpcls`.

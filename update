@@ -19,6 +19,10 @@ rm -rf "$target_dir"
 cp -r "$repo_dir" "$target_dir"
 glib-compile-schemas "$target_dir/schemas"
 
+# Backward compatibility for live GNOME Shell sessions that may still have
+# old extension code loaded and expecting proxy-url in the schema.
+gsettings set org.gnome.shell.extensions.copilot-usage proxy-url '' >/dev/null 2>&1 || true
+
 if ! command -v gnome-extensions >/dev/null 2>&1; then
 	echo "Installed extension to: $target_dir"
 	echo "Enable with: gnome-extensions enable $uuid"

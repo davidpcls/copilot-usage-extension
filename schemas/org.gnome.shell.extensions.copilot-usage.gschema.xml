@@ -21,15 +21,20 @@
       <summary>Show icon</summary>
       <description>Whether to show the Copilot icon in the top bar</description>
     </key>
+    <key name="show-percentage" type="b">
+      <default>false</default>
+      <summary>Show percentage</summary>
+      <description>Show used percentage next to the used/total label when finite quota data is available.</description>
+    </key>
     <key name="proxy-url" type="s">
       <default>''</default>
-      <summary>Proxy URL</summary>
-      <description>HTTP proxy URL (e.g., http://localhost:11809). Leave empty to use no proxy.</description>
+      <summary>Legacy proxy key</summary>
+      <description>Deprecated compatibility key retained to prevent runtime errors during live extension reloads.</description>
     </key>
     <key name="api-token" type="s">
       <default>''</default>
-      <summary>GitHub API token</summary>
-      <description>Optional manual GitHub token. If empty, the extension uses GitHub CLI authentication.</description>
+      <summary>Legacy API token migration key</summary>
+      <description>Legacy plaintext token key. Existing values are migrated to the login keyring and then cleared.</description>
     </key>
   </schema>
 </schemalist>
