@@ -104,7 +104,7 @@ export default class CopilotUsagePreferences extends ExtensionPreferences {
 
         const showPercentageRow = new Adw.SwitchRow({
             title: 'Show Percentage',
-            subtitle: 'Append used percentage next to used/total text when quota is finite',
+            subtitle: 'Show percent in the top bar label',
         });
         settings.bind(
             'show-percentage',
@@ -112,7 +112,26 @@ export default class CopilotUsagePreferences extends ExtensionPreferences {
             'active',
             Gio.SettingsBindFlags.DEFAULT
         );
+        showPercentageRow.connect('notify::active', () => {
+            settings.set_boolean('show-percentage', showPercentageRow.get_active());
+        });
         displayGroup.add(showPercentageRow);
+
+        const showTokenQuantitiesRow = new Adw.SwitchRow({
+            title: 'Show Token Quantities',
+            subtitle: 'Show used/total counts in the top bar label',
+        });
+        settings.bind(
+            'show-token-quantities',
+            showTokenQuantitiesRow,
+            'active',
+            Gio.SettingsBindFlags.DEFAULT
+        );
+        displayGroup.add(showTokenQuantitiesRow);
+
+        showTokenQuantitiesRow.connect('notify::active', () => {
+            settings.set_boolean('show-token-quantities', showTokenQuantitiesRow.get_active());
+        });
 
         const authGroup = new Adw.PreferencesGroup({
             title: 'Authentication',

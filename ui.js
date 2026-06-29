@@ -30,6 +30,9 @@ class CopilotUsageIndicator extends PanelMenu.Button {
         this._isRefreshing = false;
         this._pendingRefresh = false;
         this._hasQuotaProgressData = false;
+        this._lastQuotaData = null;
+
+        this._settingsSignalIds = [];
 
         this._migrateLegacyToken();
 
@@ -37,7 +40,7 @@ class CopilotUsageIndicator extends PanelMenu.Button {
             style_class: 'panel-status-menu-box',
         });
 
-        const iconPath = GLib.build_filenamev([this._extensionPath, 'copilot-icon-22.png']);
+        const iconPath = GLib.build_filenamev([this._extensionPath, 'github-copilot-icon.svg']);
         const gicon = Gio.icon_new_for_string(iconPath);
         this._icon = new St.Icon({
             gicon,
@@ -72,19 +75,32 @@ class CopilotUsageIndicator extends PanelMenu.Button {
         this._updateIconStyle();
         this._setUnavailableState('...', 'Loading...');
 
-        this._settingsChangedId = this._settings.connect('changed', (settings, key) => {
-            if (key === 'refresh-interval') {
+        this._settingsSignalIds.push(
+            this._settings.connect('changed::refresh-interval', () => {
                 this._restartTimer();
-            } else if (key === 'display-mode') {
+            }),
+            this._settings.connect('changed::display-mode', () => {
                 this._updateDisplayMode();
-            } else if (key === 'show-icon') {
+                this._refreshPresentation();
+            }),
+            this._settings.connect('changed::show-icon', () => {
                 this._updateIconVisibility();
-            } else if (key === 'icon-style') {
+            }),
+            this._settings.connect('changed::icon-style', () => {
                 this._updateIconStyle();
-            } else if (key === 'show-percentage') {
-                this._refreshUsage();
+            }),
+            this._settings.connect('changed::show-percentage', () => {
+                this._refreshPresentation();
+            }),
+            this._settings.connect('changed::show-token-quantities', () => {
+                this._refreshPresentation();
+            })
+        );
+        this._settingsSignalIds.push(this._settings.connect('changed', (settings, key) => {
+            if (key === 'show-token-quantities' || key === 'show-percentage' || key === 'display-mode') {
+                this._refreshPresentation();
             }
-        });
+        }));
 
         this._refreshUsage();
         this._startTimer();
@@ -136,68 +152,24 @@ class CopilotUsageIndicator extends PanelMenu.Button {
         });
         usedBox.add_child(this._resetLabel);
 
+        this._remainingLabel = new St.Label({
+            text: 'Remaining: ...',
+            style_class: 'copilot-detail-label',
+        });
+        usedBox.add_child(this._remainingLabel);
+
+        this._quotaNoteLabel = new St.Label({
+            text: 'Source: /copilot_internal/user',
+            style_class: 'copilot-detail-label',
+        });
+        usedBox.add_child(this._quotaNoteLabel);
+
         const usedItem = new PopupMenu.PopupBaseMenuItem({
             reactive: false,
             can_focus: false,
         });
         usedItem.add_child(usedBox);
         this.menu.addMenuItem(usedItem);
-
-        this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
-
-        const totalBox = new St.BoxLayout({
-            style_class: 'copilot-usage-section',
-            vertical: true,
-            x_expand: true,
-        });
-        const totalHeader = new St.BoxLayout({
-            vertical: false,
-            x_expand: true,
-            style_class: 'copilot-section-header',
-        });
-        this._totalTitle = new St.Label({
-            text: 'Total',
-            style_class: 'copilot-section-title',
-            x_expand: true,
-            x_align: Clutter.ActorAlign.START,
-        });
-        totalHeader.add_child(this._totalTitle);
-        this._totalValue = new St.Label({
-            text: '...',
-            style_class: 'copilot-value-label',
-            x_align: Clutter.ActorAlign.END,
-        });
-        totalHeader.add_child(this._totalValue);
-        totalBox.add_child(totalHeader);
-
-        const totalProgressBg = new St.Widget({
-            style_class: 'copilot-progress-bg',
-            x_expand: true,
-        });
-        this._remainingProgressBar = new St.Widget({
-            style_class: 'copilot-progress-bar usage-low',
-        });
-        totalProgressBg.add_child(this._remainingProgressBar);
-        totalBox.add_child(totalProgressBg);
-
-        this._remainingLabel = new St.Label({
-            text: 'Remaining: ...',
-            style_class: 'copilot-detail-label',
-        });
-        totalBox.add_child(this._remainingLabel);
-
-        this._quotaNoteLabel = new St.Label({
-            text: 'Source: /copilot_internal/user',
-            style_class: 'copilot-detail-label',
-        });
-        totalBox.add_child(this._quotaNoteLabel);
-
-        const totalItem = new PopupMenu.PopupBaseMenuItem({
-            reactive: false,
-            can_focus: false,
-        });
-        totalItem.add_child(totalBox);
-        this.menu.addMenuItem(totalItem);
 
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
@@ -363,6 +335,20 @@ class CopilotUsageIndicator extends PanelMenu.Button {
 
     _applyUsageData(payload) {
         const data = normalizeQuotaData(payload);
+        this._lastQuotaData = data;
+        this._renderQuotaData(data);
+    }
+
+    _refreshPresentation() {
+        if (this._lastQuotaData !== null) {
+            this._renderQuotaData(this._lastQuotaData);
+            return;
+        }
+
+        this._refreshUsage();
+    }
+
+    _renderQuotaData(data) {
 
         const usedText = formatCredits(data.used);
         this._usedValue.set_text(`${usedText} used`);
@@ -370,39 +356,31 @@ class CopilotUsageIndicator extends PanelMenu.Button {
 
         if (data.unlimited) {
             this._hasQuotaProgressData = false;
-            this._label.set_text(`${usedText} / Unlimited`);
-            this._totalValue.set_text('Unlimited');
+            this._label.set_text(this._buildPanelLabel(data));
             this._remainingLabel.set_text('Remaining: Unlimited');
             this._quotaNoteLabel.set_text(data.planLabel ? `Plan: ${data.planLabel}` : 'Premium interactions are unlimited');
             this._updatePanelProgressBar(0);
             this._updateProgressBar(this._usedProgressBar, 0, false);
-            this._updateProgressBar(this._remainingProgressBar, 0, true);
             this._updateDisplayMode();
             return;
         }
 
         if (data.hasFiniteQuota) {
-            const showPercent = this._settings.get_boolean('show-percentage');
-            const usedWithTotal = `${formatCredits(data.used)}/${formatCredits(data.entitlement)}`;
-            const percentText = `${Math.round(data.percentUsed)}%`;
+            this._usedValue.set_text(`${formatCredits(data.used)} used`);
+            this._remainingLabel.set_text(`Remaining: ${formatCredits(data.remaining)}`);
 
             this._hasQuotaProgressData = true;
-            this._label.set_text(showPercent ? `${usedWithTotal} (${percentText})` : usedWithTotal);
-            this._totalValue.set_text(`${formatCredits(data.entitlement)} total`);
-            this._remainingLabel.set_text(`Remaining: ${formatCredits(data.remaining)}`);
+            this._label.set_text(this._buildPanelLabel(data));
             this._quotaNoteLabel.set_text(data.planLabel ? `Plan: ${data.planLabel}` : 'Source: /copilot_internal/user');
             this._updatePanelProgressBar(data.percentUsed);
             this._updateProgressBar(this._usedProgressBar, data.percentUsed, false);
-            this._updateProgressBar(this._remainingProgressBar, data.percentRemaining, true);
         } else {
             this._hasQuotaProgressData = false;
-            this._label.set_text(usedText);
-            this._totalValue.set_text('Unavailable');
+            this._label.set_text('Quota');
             this._remainingLabel.set_text('Remaining: —');
             this._quotaNoteLabel.set_text('Premium interactions quota unavailable');
             this._updatePanelProgressBar(0);
             this._updateProgressBar(this._usedProgressBar, 0, false);
-            this._updateProgressBar(this._remainingProgressBar, 0, true);
         }
 
         this._updateDisplayMode();
@@ -410,18 +388,47 @@ class CopilotUsageIndicator extends PanelMenu.Button {
 
     _setUnavailableState(label, detail) {
         this._hasQuotaProgressData = false;
+        this._lastQuotaData = null;
 
         this._label.set_text(label);
         this._usedValue.set_text(detail);
         this._resetLabel.set_text('Reset: —');
-        this._totalValue.set_text('Unavailable');
         this._remainingLabel.set_text('Remaining: —');
         this._quotaNoteLabel.set_text('Source: /copilot_internal/user');
 
         this._updatePanelProgressBar(0);
         this._updateProgressBar(this._usedProgressBar, 0, false);
-        this._updateProgressBar(this._remainingProgressBar, 0, true);
         this._updateDisplayMode();
+    }
+
+    _buildPanelLabel(data) {
+        const showQuantities = this._settings.get_boolean('show-token-quantities');
+        const showPercentage = this._settings.get_boolean('show-percentage');
+
+        if (data.unlimited) {
+            if (showQuantities) {
+                return `${formatCredits(data.used)} / Unlimited`;
+            }
+
+            return 'Unlimited';
+        }
+
+        const usedWithTotal = `${formatCredits(data.used)}/${formatCredits(data.entitlement)}`;
+        const percentText = `${Math.round(data.percentUsed)}%`;
+
+        if (showQuantities && showPercentage) {
+            return `${usedWithTotal} (${percentText})`;
+        }
+
+        if (showQuantities) {
+            return usedWithTotal;
+        }
+
+        if (showPercentage) {
+            return percentText;
+        }
+
+        return 'Copilot';
     }
 
     _updatePanelProgressBar(percent) {
@@ -527,9 +534,11 @@ class CopilotUsageIndicator extends PanelMenu.Button {
         this._apiClient?.destroy();
         this._apiClient = null;
 
-        if (this._settingsChangedId) {
-            this._settings.disconnect(this._settingsChangedId);
-            this._settingsChangedId = null;
+        if (this._settingsSignalIds.length > 0) {
+            for (const signalId of this._settingsSignalIds) {
+                this._settings.disconnect(signalId);
+            }
+            this._settingsSignalIds = [];
         }
         super.destroy();
     }

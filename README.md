@@ -8,10 +8,16 @@ Display GitHub Copilot usage in the GNOME Shell top panel.
 
 - Shows premium interactions usage in the top panel
 - Uses Copilot quota data from `GET /copilot_internal/user`
-- Displays used credits, total credits, remaining credits, reset date, and last refresh time in the dropdown
+- Displays used credits, remaining credits, reset date, and last refresh time in the dropdown
 - Handles unlimited plans explicitly
 - Supports text, progress bar, or both
-- Includes configurable refresh interval, icon style, and optional percentage display
+- Includes configurable refresh interval, optional icon visibility/style, optional percentage display, and optional token quantity display
+
+Display options:
+- `Show Token Quantities` ON + `Show Percentage` OFF: shows `used/total`
+- `Show Token Quantities` ON + `Show Percentage` ON: shows `used/total (percent)`
+- `Show Token Quantities` OFF + `Show Percentage` ON: shows `percent`
+- `Show Token Quantities` OFF + `Show Percentage` OFF: shows `Copilot`
 
 ## Requirements
 

@@ -12,12 +12,12 @@
       <description>How to display premium interactions in the panel: 'text' for credit text, 'bar' for a progress bar, or 'both' for both</description>
     </key>
     <key name="icon-style" type="s">
-      <default>'color'</default>
+      <default>'monochrome'</default>
       <summary>Icon style</summary>
       <description>Icon style: 'color' for the original colored icon, 'monochrome' for a desaturated monochrome icon</description>
     </key>
     <key name="show-icon" type="b">
-      <default>true</default>
+      <default>false</default>
       <summary>Show icon</summary>
       <description>Whether to show the Copilot icon in the top bar</description>
     </key>
@@ -25,6 +25,11 @@
       <default>false</default>
       <summary>Show percentage</summary>
       <description>Show used percentage next to the used/total label when finite quota data is available.</description>
+    </key>
+    <key name="show-token-quantities" type="b">
+      <default>true</default>
+      <summary>Show token quantities</summary>
+      <description>Show used/total token quantities in the panel label when finite quota data is available.</description>
     </key>
     <key name="proxy-url" type="s">
       <default>''</default>
