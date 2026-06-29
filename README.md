@@ -6,19 +6,33 @@ Display GitHub Copilot usage in the GNOME Shell top panel.
 
 ## What It Shows
 
-- Shows Copilot usage in the top panel
-- Uses progress vs budget when budget data is available
-- Falls back to explicit spent text when budget is unavailable (for example: `$12.34 spent`)
-- Displays spent amount, budget status, period, and last refresh time in the dropdown
+- Shows premium interactions usage in the top panel
+- Uses Copilot quota data from `GET /copilot_internal/user`
+- Displays used credits, total credits, remaining credits, reset date, and last refresh time in the dropdown
+- Handles unlimited plans explicitly
 - Supports text, progress bar, or both
 - Includes configurable refresh interval, icon style, and optional HTTP proxy
 
 ## Requirements
 
-- GNOME Shell 46, 47, 48, 49, or 50
-- GitHub CLI (`gh`) installed
-- GitHub CLI authenticated with `gh auth login --hostname github.com`
-- GitHub account with Copilot usage available through billing APIs
+- GNOME Shell 45, 46, 47, 48, 49, 50, or 51
+- Either a GitHub API token entered in extension settings, or GitHub CLI (`gh`) installed and authenticated with `gh auth login --hostname github.com`
+- GitHub account with Copilot access and quota data available from `/copilot_internal/user`
+
+## Create a GitHub API token
+
+Use a token that can read Copilot entitlement/quota data from `/copilot_internal/user`.
+
+1. Open `https://github.com/settings/tokens`.
+2. Click `Generate new token` -> `Generate new token (classic)`.
+3. Give it a note like `GNOME Copilot Usage` and choose an expiration.
+4. Start with minimal scopes and expand only if needed.
+5. Click `Generate token`, then copy the token immediately.
+6. Open this extension's preferences and paste it into `GitHub API Token`.
+
+Tip: paste only the raw token value (for example `github_pat_...`), not `Bearer ...`.
+
+If the extension shows `Token is not allowed to read Copilot quota`, create a token with appropriate Copilot/API access for your account.
 
 ## Installation
 
@@ -33,12 +47,12 @@ From the `copilot-usage-extension` directory:
 The script copies this extension to:
 
 ```text
-~/.local/share/gnome-shell/extensions/copilot-usage@davidpcls
+${XDG_DATA_HOME:-~/.local/share}/gnome-shell/extensions/copilot-usage@davidpcls
 ```
 
-It then recompiles the GSettings schema and ends the current GNOME session with `gnome-session-quit --no-prompt`, so save your work first.
+It recompiles the GSettings schema, then tries to discover and enable the extension automatically.
 
-After logging back in, enable the extension if needed:
+If GNOME Shell has not discovered it yet, reload Shell and then enable:
 
 ```bash
 gnome-extensions enable copilot-usage@davidpcls
@@ -49,7 +63,8 @@ gnome-extensions enable copilot-usage@davidpcls
 From the `copilot-usage-extension` directory:
 
 ```bash
-install_dir="$HOME/.local/share/gnome-shell/extensions/copilot-usage@davidpcls"
+data_home="${XDG_DATA_HOME:-$HOME/.local/share}"
+install_dir="$data_home/gnome-shell/extensions/copilot-usage@davidpcls"
 
 rm -rf "$install_dir"
 mkdir -p "$(dirname "$install_dir")"
@@ -65,15 +80,19 @@ Reload GNOME Shell after installation:
 
 ## Notes
 
-- Authentication is read from your local GitHub CLI session via `gh auth token --hostname github.com`.
-- Usage data is fetched from GitHub billing endpoints under `https://api.github.com/users/{username}/settings/billing/...`.
-- If budget data is unavailable in API responses, the extension still shows spent value explicitly in panel and menu.
+- If `GitHub API Token` is set in preferences, that token is used first.
+- If token is empty, authentication is read from GitHub CLI credentials (`~/.config/gh/hosts.yml`, then `gh auth token`).
+- Usage data is fetched only from `https://api.github.com/copilot_internal/user`.
+- The extension reads `quota_snapshots.premium_interactions` and computes `used = entitlement - remaining`.
+- If quota is unavailable in API responses, the extension falls back to limited status text.
 
 ## Troubleshooting
 
-- `Auth` in panel: install GitHub CLI and run `gh auth login --hostname github.com`.
-- `Token lacks billing access`: authenticate with a token/account that can access billing usage endpoints.
-- `No Copilot billing data`: your account may not expose Copilot usage via personal billing endpoints yet.
+- `Auth` in panel: set a valid GitHub API token in extension settings, or install GitHub CLI and run `gh auth login --hostname github.com`.
+- `Token is not allowed to read Copilot quota`: use a token/account with access to `/copilot_internal/user`.
+- `Copilot quota endpoint unavailable for this account`: Copilot entitlement/quota may not be available for this account or host.
+- `Extension ... does not exist`: reload GNOME Shell first (X11: `Alt+F2`, `r`; Wayland: log out/in), then run `gnome-extensions enable copilot-usage@davidpcls`.
+- Extension still missing: ensure your GNOME Shell major version is listed in `metadata.json` under `shell-version`.
 
 ## Disclaimer
 

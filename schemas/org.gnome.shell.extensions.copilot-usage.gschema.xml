@@ -9,7 +9,7 @@
     <key name="display-mode" type="s">
       <default>'text'</default>
       <summary>Display mode</summary>
-      <description>How to display usage in the panel: 'text' for percentage text, 'bar' for a progress bar, or 'both' for both</description>
+      <description>How to display premium interactions in the panel: 'text' for credit text, 'bar' for a progress bar, or 'both' for both</description>
     </key>
     <key name="icon-style" type="s">
       <default>'color'</default>
@@ -25,6 +25,11 @@
       <default>''</default>
       <summary>Proxy URL</summary>
       <description>HTTP proxy URL (e.g., http://localhost:11809). Leave empty to use no proxy.</description>
+    </key>
+    <key name="api-token" type="s">
+      <default>''</default>
+      <summary>GitHub API token</summary>
+      <description>Optional manual GitHub token. If empty, the extension uses GitHub CLI authentication.</description>
     </key>
   </schema>
 </schemalist>

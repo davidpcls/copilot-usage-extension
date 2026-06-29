@@ -14,6 +14,7 @@ import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 const GITHUB_API_ROOT = 'https://api.github.com';
 const GITHUB_HOST = 'github.com';
 const GITHUB_API_VERSION = '2026-03-10';
+const GH_HOSTS_FILE = 'hosts.yml';
 
 const PANEL_PROGRESS_BAR_WIDTH = 50;
 const MENU_PROGRESS_BAR_WIDTH = 240;
@@ -27,8 +28,9 @@ class CopilotUsageIndicator extends PanelMenu.Button {
         this._settings = settings;
         this._openPreferences = openPreferences;
         this._session = this._createSession();
-        this._ghToken = null;
-        this._hasBudgetData = false;
+        this._cachedToken = null;
+        this._cachedTokenSource = null;
+        this._hasQuotaProgressData = false;
 
         this._box = new St.BoxLayout({
             style_class: 'panel-status-menu-box',
@@ -80,6 +82,9 @@ class CopilotUsageIndicator extends PanelMenu.Button {
                 this._updateIconStyle();
             } else if (key === 'proxy-url') {
                 this._recreateSession();
+            } else if (key === 'api-token') {
+                this._clearCachedToken();
+                this._refreshUsage();
             }
         });
 
@@ -89,8 +94,8 @@ class CopilotUsageIndicator extends PanelMenu.Button {
 
     _updateDisplayMode() {
         const mode = this._settings.get_string('display-mode');
-        const showLabel = mode !== 'bar' || !this._hasBudgetData;
-        const showBar = (mode === 'bar' || mode === 'both') && this._hasBudgetData;
+        const showLabel = mode !== 'bar' || !this._hasQuotaProgressData;
+        const showBar = (mode === 'bar' || mode === 'both') && this._hasQuotaProgressData;
 
         if (showBar) {
             this._panelProgressBg.show();
@@ -165,7 +170,7 @@ class CopilotUsageIndicator extends PanelMenu.Button {
             style_class: 'copilot-section-header',
         });
         this._monthlyTitle = new St.Label({
-            text: 'This Month',
+            text: 'Used',
             style_class: 'copilot-section-title',
             x_expand: true,
             x_align: Clutter.ActorAlign.START,
@@ -190,7 +195,7 @@ class CopilotUsageIndicator extends PanelMenu.Button {
         monthlyBox.add_child(monthlyProgressBg);
 
         this._periodLabel = new St.Label({
-            text: 'Period: ...',
+            text: 'Reset: ...',
             style_class: 'copilot-detail-label',
         });
         monthlyBox.add_child(this._periodLabel);
@@ -215,7 +220,7 @@ class CopilotUsageIndicator extends PanelMenu.Button {
             style_class: 'copilot-section-header',
         });
         this._budgetTitle = new St.Label({
-            text: 'Budget',
+            text: 'Total',
             style_class: 'copilot-section-title',
             x_expand: true,
             x_align: Clutter.ActorAlign.START,
@@ -246,7 +251,7 @@ class CopilotUsageIndicator extends PanelMenu.Button {
         budgetBox.add_child(this._remainingLabel);
 
         this._budgetNoteLabel = new St.Label({
-            text: '...',
+            text: 'Source: /copilot_internal/user',
             style_class: 'copilot-detail-label',
         });
         budgetBox.add_child(this._budgetNoteLabel);
@@ -343,7 +348,7 @@ class CopilotUsageIndicator extends PanelMenu.Button {
 
     _refreshUsage(allowAuthRetry = true) {
         this._setRefreshing(true);
-        this._getGhToken((tokenError, token) => {
+        this._getAuthToken((tokenError, token) => {
             if (tokenError) {
                 console.error(`Copilot Usage: ${tokenError.message}`);
                 this._setUnavailableState('Auth', this._friendlyTokenError(tokenError.message));
@@ -351,48 +356,193 @@ class CopilotUsageIndicator extends PanelMenu.Button {
                 return;
             }
 
-            this._fetchCurrentUser(token, (userError, login, userStatusCode) => {
-                if (userError) {
-                    if (this._shouldRetryAuth(allowAuthRetry, userStatusCode)) {
-                        this._ghToken = null;
+            this._fetchCopilotInternalUser(token, (usageError, usageData, usageStatusCode) => {
+                if (usageError) {
+                    if (this._shouldRetryAuth(allowAuthRetry, usageStatusCode)) {
+                        this._clearCachedToken();
                         this._refreshUsage(false);
                         return;
                     }
 
-                    console.error(`Copilot Usage: ${userError.message}`);
-                    this._setUnavailableState('Error', this._friendlyApiError(userStatusCode));
+                    if (usageStatusCode !== 404) {
+                        console.error(`Copilot Usage: /copilot_internal/user failed with HTTP ${usageStatusCode}: ${usageError.message}`);
+                    }
+                    this._setUnavailableState('Error', this._friendlyApiError(usageStatusCode));
                     this._finishRefresh();
                     return;
                 }
 
-                this._fetchUsageSummary(token, login, (usageError, usageData, usageStatusCode) => {
-                    if (usageError) {
-                        if (this._shouldRetryAuth(allowAuthRetry, usageStatusCode)) {
-                            this._ghToken = null;
-                            this._refreshUsage(false);
-                            return;
-                        }
-
-                        console.error(`Copilot Usage: ${usageError.message}`);
-                        this._setUnavailableState('Error', this._friendlyApiError(usageStatusCode));
-                        this._finishRefresh();
-                        return;
-                    }
-
-                    this._applyUsageData(usageData);
-                    this._finishRefresh();
-                });
+                this._applyUsageData(usageData);
+                this._finishRefresh();
             });
         });
     }
 
     _shouldRetryAuth(allowAuthRetry, statusCode) {
-        return allowAuthRetry && statusCode === 401;
+        return allowAuthRetry && statusCode === 401 && !this._isUsingManualToken();
     }
 
-    _getGhToken(callback) {
-        if (this._ghToken && this._ghToken.length > 0) {
-            callback(null, this._ghToken);
+    _isUsingManualToken() {
+        return this._extractTokenCandidate(this._settings.get_string('api-token')) !== '';
+    }
+
+    _clearCachedToken() {
+        this._cachedToken = null;
+        this._cachedTokenSource = null;
+    }
+
+    _setCachedToken(token, source) {
+        this._cachedToken = token;
+        this._cachedTokenSource = source;
+    }
+
+    _extractTokenCandidate(rawValue) {
+        const value = String(rawValue ?? '').trim();
+        if (value === '') {
+            return '';
+        }
+
+        const lowered = value.toLowerCase();
+        if (lowered.startsWith('github_pat_') || lowered.startsWith('ghp_') || lowered.startsWith('gho_')) {
+            return value;
+        }
+
+        const prefixes = ['token ', 'bearer '];
+        for (const prefix of prefixes) {
+            if (lowered.startsWith(prefix)) {
+                return value.slice(prefix.length).trim();
+            }
+        }
+
+        return value;
+    }
+
+    _getAuthToken(callback) {
+        const manualToken = this._extractTokenCandidate(this._settings.get_string('api-token'));
+
+        if (manualToken !== '') {
+            this._setCachedToken(manualToken, 'manual');
+            callback(null, manualToken);
+            return;
+        }
+
+        if (this._cachedTokenSource !== 'manual' && this._cachedToken && this._cachedToken.length > 0) {
+            callback(null, this._cachedToken);
+            return;
+        }
+
+        this._getTokenFromGhConfig((configError, configToken) => {
+            if (configError) {
+                callback(configError, null);
+                return;
+            }
+
+            if (configToken) {
+                this._setCachedToken(configToken, 'gh-config');
+                callback(null, configToken);
+                return;
+            }
+
+            this._getTokenFromGhCli((cliError, cliToken) => {
+                if (cliError) {
+                    callback(cliError, null);
+                    return;
+                }
+
+                this._setCachedToken(cliToken, 'gh-cli');
+                callback(null, cliToken);
+            });
+        });
+    }
+
+    _getTokenFromGhConfig(callback) {
+        const configRoot = GLib.getenv('XDG_CONFIG_HOME') ?? GLib.build_filenamev([GLib.get_home_dir(), '.config']);
+        const hostsPath = GLib.build_filenamev([configRoot, 'gh', GH_HOSTS_FILE]);
+        const file = Gio.File.new_for_path(hostsPath);
+
+        if (!file.query_exists(null)) {
+            callback(null, null);
+            return;
+        }
+
+        file.load_contents_async(null, (source, result) => {
+            try {
+                const [, contents] = source.load_contents_finish(result);
+                const decoder = new TextDecoder('utf-8');
+                const token = this._parseTokenFromHostsYaml(decoder.decode(contents), GITHUB_HOST);
+                callback(null, token);
+            } catch (e) {
+                callback(new Error(`Failed to read GitHub CLI config: ${e.message}`), null);
+            }
+        });
+    }
+
+    _parseTokenFromHostsYaml(text, hostname) {
+        const lines = text.split(/\r?\n/);
+        let inHost = false;
+        let hostIndent = 0;
+
+        for (const line of lines) {
+            const raw = line;
+            const trimmed = raw.trim();
+            if (trimmed === '' || trimmed.startsWith('#')) {
+                continue;
+            }
+
+            const hostMatch = raw.match(/^(\s*)([^:\s][^:]*)\s*:\s*$/);
+            if (hostMatch) {
+                const indent = hostMatch[1].length;
+                const key = hostMatch[2].trim();
+
+                if (key === hostname) {
+                    inHost = true;
+                    hostIndent = indent;
+                    continue;
+                }
+
+                if (inHost && indent <= hostIndent) {
+                    inHost = false;
+                }
+            }
+
+            if (!inHost) {
+                continue;
+            }
+
+            const tokenMatch = raw.match(/^\s*oauth_token\s*:\s*(.+)\s*$/);
+            if (!tokenMatch) {
+                continue;
+            }
+
+            const parsed = this._extractTokenCandidate(this._stripYamlScalar(tokenMatch[1]));
+            if (parsed !== '') {
+                return parsed;
+            }
+        }
+
+        return null;
+    }
+
+    _stripYamlScalar(value) {
+        const hashIndex = value.indexOf('#');
+        const withoutComment = hashIndex >= 0 ? value.slice(0, hashIndex) : value;
+        const trimmed = withoutComment.trim();
+        if (trimmed.length < 2) {
+            return trimmed;
+        }
+
+        const first = trimmed[0];
+        const last = trimmed[trimmed.length - 1];
+        if ((first === '"' && last === '"') || (first === '\'' && last === '\'')) {
+            return trimmed.slice(1, -1);
+        }
+
+        return trimmed;
+    }
+
+    _getTokenFromGhCli(callback) {
+        if (this._cachedTokenSource === 'gh-cli' && this._cachedToken && this._cachedToken.length > 0) {
+            callback(null, this._cachedToken);
             return;
         }
 
@@ -410,7 +560,7 @@ class CopilotUsageIndicator extends PanelMenu.Button {
         process.communicate_utf8_async(null, null, (proc, result) => {
             try {
                 const [, stdout, stderr] = proc.communicate_utf8_finish(result);
-                const token = stdout.trim();
+                const token = this._extractTokenCandidate(stdout);
 
                 if (!proc.get_successful() || token === '') {
                     const detail = stderr.trim() || 'GitHub CLI returned no token';
@@ -418,7 +568,6 @@ class CopilotUsageIndicator extends PanelMenu.Button {
                     return;
                 }
 
-                this._ghToken = token;
                 callback(null, token);
             } catch (e) {
                 callback(new Error(`Failed to read gh token: ${e.message}`), null);
@@ -426,44 +575,8 @@ class CopilotUsageIndicator extends PanelMenu.Button {
         });
     }
 
-    _fetchCurrentUser(token, callback) {
-        this._apiGetJson(`${GITHUB_API_ROOT}/user`, token, (error, data, statusCode) => {
-            if (error) {
-                callback(error, null, statusCode);
-                return;
-            }
-
-            const login = data?.login;
-            if (typeof login !== 'string' || login.trim() === '') {
-                callback(new Error('GitHub API did not return a user login'), null, statusCode);
-                return;
-            }
-
-            callback(null, login.trim(), statusCode);
-        });
-    }
-
-    _fetchUsageSummary(token, login, callback) {
-        const now = GLib.DateTime.new_now_local();
-        const year = now.get_year();
-        const month = now.get_month();
-        const encodedLogin = GLib.uri_escape_string(login, null, false);
-
-        const summaryUrl = `${GITHUB_API_ROOT}/users/${encodedLogin}/settings/billing/usage/summary?year=${year}&month=${month}&product=copilot`;
-        this._apiGetJson(summaryUrl, token, (error, data, statusCode) => {
-            if (!error) {
-                callback(null, data, statusCode);
-                return;
-            }
-
-            if (statusCode !== 404) {
-                callback(error, null, statusCode);
-                return;
-            }
-
-            const fallbackUrl = `${GITHUB_API_ROOT}/users/${encodedLogin}/settings/billing/usage?year=${year}&month=${month}&product=copilot`;
-            this._apiGetJson(fallbackUrl, token, callback);
-        });
+    _fetchCopilotInternalUser(token, callback) {
+        this._apiGetJson(`${GITHUB_API_ROOT}/copilot_internal/user`, token, callback);
     }
 
     _apiGetJson(url, token, callback) {
@@ -498,31 +611,40 @@ class CopilotUsageIndicator extends PanelMenu.Button {
     }
 
     _applyUsageData(payload) {
-        const data = this._normalizeUsageData(payload);
+        const data = this._normalizeQuotaData(payload);
 
-        const spentText = `${this._formatCurrency(data.spent)} spent`;
-        this._monthlyValue.set_text(spentText);
-        this._periodLabel.set_text(`Period: ${data.periodLabel}`);
+        const usedText = this._formatCredits(data.used);
+        this._monthlyValue.set_text(`${usedText} used`);
+        this._periodLabel.set_text(`Reset: ${data.resetLabel}`);
 
-        if (data.budget !== null && data.budget > 0) {
-            const spentPercent = this._clampPercent((data.spent / data.budget) * 100);
-            const remaining = Math.max(0, data.budget - data.spent);
-            const remainingPercent = this._clampPercent((remaining / data.budget) * 100);
+        if (data.unlimited) {
+            this._hasQuotaProgressData = false;
+            this._label.set_text(`${usedText} / Unlimited`);
+            this._budgetValue.set_text('Unlimited');
+            this._remainingLabel.set_text('Remaining: Unlimited');
+            this._budgetNoteLabel.set_text(data.planLabel ? `Plan: ${data.planLabel}` : 'Premium interactions are unlimited');
+            this._updatePanelProgressBar(0);
+            this._updateProgressBar(this._monthlyProgressBar, 0, false);
+            this._updateProgressBar(this._budgetProgressBar, 0, true);
+            this._updateDisplayMode();
+            return;
+        }
 
-            this._hasBudgetData = true;
-            this._label.set_text(`${Math.round(spentPercent)}%`);
-            this._budgetValue.set_text(`${this._formatCurrency(data.budget)} budget`);
-            this._remainingLabel.set_text(`Remaining: ${this._formatCurrency(remaining)}`);
-            this._budgetNoteLabel.set_text('Budget from Copilot API');
-            this._updatePanelProgressBar(spentPercent);
-            this._updateProgressBar(this._monthlyProgressBar, spentPercent, false);
-            this._updateProgressBar(this._budgetProgressBar, remainingPercent, true);
+        if (data.hasFiniteQuota) {
+            this._hasQuotaProgressData = true;
+            this._label.set_text(`${this._formatCredits(data.used)}/${this._formatCredits(data.entitlement)}`);
+            this._budgetValue.set_text(`${this._formatCredits(data.entitlement)} total`);
+            this._remainingLabel.set_text(`Remaining: ${this._formatCredits(data.remaining)}`);
+            this._budgetNoteLabel.set_text(data.planLabel ? `Plan: ${data.planLabel}` : 'Source: /copilot_internal/user');
+            this._updatePanelProgressBar(data.percentUsed);
+            this._updateProgressBar(this._monthlyProgressBar, data.percentUsed, false);
+            this._updateProgressBar(this._budgetProgressBar, data.percentRemaining, true);
         } else {
-            this._hasBudgetData = false;
-            this._label.set_text(spentText);
+            this._hasQuotaProgressData = false;
+            this._label.set_text(usedText);
             this._budgetValue.set_text('Unavailable');
             this._remainingLabel.set_text('Remaining: —');
-            this._budgetNoteLabel.set_text('Budget unavailable from API');
+            this._budgetNoteLabel.set_text('Premium interactions quota unavailable');
             this._updatePanelProgressBar(0);
             this._updateProgressBar(this._monthlyProgressBar, 0, false);
             this._updateProgressBar(this._budgetProgressBar, 0, true);
@@ -531,80 +653,74 @@ class CopilotUsageIndicator extends PanelMenu.Button {
         this._updateDisplayMode();
     }
 
-    _normalizeUsageData(payload) {
-        const usageItems = this._extractUsageItems(payload);
-        const copilotItems = this._extractCopilotItems(usageItems);
-
-        let spent = this._sumNetAmount(copilotItems);
-        if (spent === 0) {
-            spent = this._coerceNumber(payload?.effective_budget?.consumed_amount) ?? 0;
+    _normalizeQuotaData(payload) {
+        const snapshot = this._extractPremiumInteractionsSnapshot(payload);
+        if (snapshot === null) {
+            return {
+                used: null,
+                remaining: null,
+                entitlement: null,
+                percentUsed: 0,
+                percentRemaining: 0,
+                hasFiniteQuota: false,
+                unlimited: false,
+                resetLabel: '—',
+                planLabel: this._extractPlanLabel(payload, null),
+            };
         }
 
-        const budget = this._extractBudget(payload, copilotItems);
+        const entitlement = this._extractNumericValue(snapshot, ['entitlement', 'quota_entitlement', 'total', 'limit']);
+        let remaining = this._extractNumericValue(snapshot, ['remaining', 'quota_remaining', 'available']);
+        let used = this._extractNumericValue(snapshot, ['used', 'quota_used', 'consumed', 'usage']);
+        const unlimited = this._coerceBoolean(snapshot?.unlimited);
+
+        if (entitlement !== null && remaining !== null) {
+            used = Math.max(0, entitlement - remaining);
+        } else if (entitlement !== null && used !== null) {
+            remaining = Math.max(0, entitlement - used);
+        }
+
+        const finiteQuota = !unlimited
+            && entitlement !== null
+            && entitlement > 0
+            && remaining !== null
+            && used !== null;
+
+        const percentUsed = finiteQuota ? this._clampPercent((used / entitlement) * 100) : 0;
+        const percentRemaining = finiteQuota ? this._clampPercent((remaining / entitlement) * 100) : 0;
 
         return {
-            spent,
-            budget,
-            periodLabel: this._periodLabelFromPayload(payload),
+            used,
+            remaining,
+            entitlement,
+            percentUsed,
+            percentRemaining,
+            hasFiniteQuota: finiteQuota,
+            unlimited,
+            resetLabel: this._extractResetLabel(snapshot, payload),
+            planLabel: this._extractPlanLabel(payload, snapshot),
         };
     }
 
-    _extractUsageItems(payload) {
-        const usageItems = payload?.usageItems;
-        if (Array.isArray(usageItems)) {
-            return usageItems;
+    _extractPremiumInteractionsSnapshot(payload) {
+        const quotaSnapshots = payload?.quota_snapshots ?? payload?.quotaSnapshots;
+        const nested = quotaSnapshots?.premium_interactions ?? quotaSnapshots?.premiumInteractions;
+        if (nested && typeof nested === 'object') {
+            return nested;
         }
 
-        const snakeCaseItems = payload?.usage_items;
-        if (Array.isArray(snakeCaseItems)) {
-            return snakeCaseItems;
+        const flat = payload?.premium_interactions ?? payload?.premiumInteractions;
+        if (flat && typeof flat === 'object') {
+            return flat;
         }
 
-        return [];
+        return null;
     }
 
-    _extractCopilotItems(items) {
-        const explicitCopilotItems = items.filter(item => this._isCopilotItem(item));
-        if (explicitCopilotItems.length > 0) {
-            return explicitCopilotItems;
-        }
-
-        return items;
-    }
-
-    _isCopilotItem(item) {
-        const product = String(item?.product ?? item?.product_name ?? '').toLowerCase();
-        const sku = String(item?.sku ?? item?.product_sku ?? '').toLowerCase();
-
-        return product.includes('copilot') || sku.includes('copilot');
-    }
-
-    _sumNetAmount(items) {
-        return items.reduce((total, item) => {
-            const amount = this._coerceNumber(item?.netAmount)
-                ?? this._coerceNumber(item?.net_amount)
-                ?? this._coerceNumber(item?.amount)
-                ?? 0;
-            return total + amount;
-        }, 0);
-    }
-
-    _extractBudget(payload, items) {
-        const candidates = [
-            payload?.effective_budget?.budget_amount,
-            payload?.effective_budget?.budgetAmount,
-            payload?.budget?.amount,
-            payload?.budget_amount,
-            payload?.budgetAmount,
-            items[0]?.budget_amount,
-            items[0]?.budgetAmount,
-            items[0]?.budget,
-            items[0]?.limit,
-        ];
-
-        for (const candidate of candidates) {
-            const numeric = this._coerceNumber(candidate);
-            if (numeric !== null && numeric > 0) {
+    _extractNumericValue(source, keys) {
+        for (const key of keys) {
+            const numeric = this._coerceNumber(source?.[key]);
+            if (numeric !== null) {
                 return numeric;
             }
         }
@@ -612,21 +728,46 @@ class CopilotUsageIndicator extends PanelMenu.Button {
         return null;
     }
 
-    _periodLabelFromPayload(payload) {
-        const timePeriod = payload?.timePeriod ?? payload?.time_period ?? null;
-        if (timePeriod && timePeriod.year && timePeriod.month) {
-            const year = Math.trunc(timePeriod.year);
-            const month = String(Math.trunc(timePeriod.month)).padStart(2, '0');
-            if (timePeriod.day) {
-                const day = String(Math.trunc(timePeriod.day)).padStart(2, '0');
-                return `${year}-${month}-${day}`;
+    _extractResetLabel(snapshot, payload) {
+        const candidates = [
+            snapshot?.quota_reset_date_utc,
+            snapshot?.quota_reset_date,
+            snapshot?.reset_date_utc,
+            snapshot?.reset_date,
+            payload?.quota_reset_date_utc,
+            payload?.quota_reset_date,
+        ];
+
+        for (const candidate of candidates) {
+            const formatted = this._formatResetDate(candidate);
+            if (formatted !== '') {
+                return formatted;
             }
-            return `${year}-${month}`;
         }
 
-        const now = GLib.DateTime.new_now_local();
-        const month = String(now.get_month()).padStart(2, '0');
-        return `${now.get_year()}-${month}`;
+        return '—';
+    }
+
+    _extractPlanLabel(payload, snapshot) {
+        const candidates = [
+            payload?.copilot_plan,
+            payload?.access_type_sku,
+            snapshot?.plan,
+            snapshot?.sku,
+        ];
+
+        for (const candidate of candidates) {
+            if (typeof candidate !== 'string') {
+                continue;
+            }
+
+            const trimmed = candidate.trim();
+            if (trimmed !== '') {
+                return trimmed;
+            }
+        }
+
+        return null;
     }
 
     _coerceNumber(value) {
@@ -644,15 +785,68 @@ class CopilotUsageIndicator extends PanelMenu.Button {
         return null;
     }
 
+    _coerceBoolean(value) {
+        if (typeof value === 'boolean') {
+            return value;
+        }
+
+        if (typeof value === 'string') {
+            const lowered = value.trim().toLowerCase();
+            if (lowered === 'true') {
+                return true;
+            }
+            if (lowered === 'false') {
+                return false;
+            }
+        }
+
+        return false;
+    }
+
+    _formatResetDate(value) {
+        const raw = String(value ?? '').trim();
+        if (raw === '') {
+            return '';
+        }
+
+        const parsed = new Date(raw);
+        if (!Number.isNaN(parsed.getTime())) {
+            const year = parsed.getUTCFullYear();
+            const month = String(parsed.getUTCMonth() + 1).padStart(2, '0');
+            const day = String(parsed.getUTCDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        }
+
+        const simpleDateMatch = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+        if (simpleDateMatch) {
+            return simpleDateMatch[1];
+        }
+
+        return raw;
+    }
+
+    _formatCredits(value) {
+        const numeric = this._coerceNumber(value);
+        if (numeric === null) {
+            return '—';
+        }
+
+        if (Number.isInteger(numeric)) {
+            return `${numeric}`;
+        }
+
+        return `${numeric.toFixed(2)}`;
+    }
+
     _setUnavailableState(label, detail) {
-        this._hasBudgetData = false;
+        this._hasQuotaProgressData = false;
 
         this._label.set_text(label);
         this._monthlyValue.set_text(detail);
-        this._periodLabel.set_text('Period: —');
+        this._periodLabel.set_text('Reset: —');
         this._budgetValue.set_text('Unavailable');
         this._remainingLabel.set_text('Remaining: —');
-        this._budgetNoteLabel.set_text('Budget unavailable from API');
+        this._budgetNoteLabel.set_text('Source: /copilot_internal/user');
 
         this._updatePanelProgressBar(0);
         this._updateProgressBar(this._monthlyProgressBar, 0, false);
@@ -709,35 +903,36 @@ class CopilotUsageIndicator extends PanelMenu.Button {
         return Math.min(100, Math.max(0, numeric));
     }
 
-    _formatCurrency(value) {
-        const numeric = this._coerceNumber(value) ?? 0;
-        return `$${numeric.toFixed(2)}`;
-    }
-
     _friendlyTokenError(detail) {
         const message = String(detail).toLowerCase();
+        if (message.includes('no oauth token found')) {
+            return 'Set API token in extension settings';
+        }
+
         if (message.includes('no such file or directory') || message.includes('unable to execute gh')) {
-            return 'Install GitHub CLI (gh)';
+            return 'Set API token or install gh';
         }
 
         if (message.includes('not logged') || message.includes('authentication')) {
-            return 'Run gh auth login';
+            return 'Set API token or run gh auth login';
         }
 
-        return 'Run gh auth login';
+        return 'Set API token or run gh auth login';
     }
 
     _friendlyApiError(statusCode) {
         if (statusCode === 401) {
-            return 'Run gh auth login';
+            return this._isUsingManualToken()
+                ? 'Invalid API token'
+                : 'Set API token or run gh auth login';
         }
 
         if (statusCode === 403) {
-            return 'Token lacks billing access';
+            return 'Token is not allowed to read Copilot quota';
         }
 
         if (statusCode === 404) {
-            return 'No Copilot billing data';
+            return 'Copilot quota endpoint unavailable for this account';
         }
 
         if (statusCode && statusCode > 0) {

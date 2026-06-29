@@ -47,7 +47,7 @@ export default class CopilotUsagePreferences extends ExtensionPreferences {
 
         const displayModeRow = new Adw.ComboRow({
             title: 'Display Mode',
-            subtitle: 'Show usage as text, progress bar, or both when budget data is available',
+            subtitle: 'Show premium interactions as text, progress bar, or both when quota data is available',
         });
 
         const displayModeModel = new Gtk.StringList();
@@ -127,12 +127,22 @@ export default class CopilotUsagePreferences extends ExtensionPreferences {
 
         const authGroup = new Adw.PreferencesGroup({
             title: 'Authentication',
-            description: 'This extension uses GitHub CLI credentials from your local machine',
+            description: 'Use either a manual token or your local GitHub CLI credentials',
         });
         page.add(authGroup);
 
+        const tokenRow = new Adw.EntryRow({
+            title: 'GitHub API Token',
+        });
+        tokenRow.set_input_purpose(Gtk.InputPurpose.PASSWORD);
+        tokenRow.set_text(settings.get_string('api-token'));
+        tokenRow.connect('notify::text', () => {
+            settings.set_string('api-token', tokenRow.get_text().trim());
+        });
+        authGroup.add(tokenRow);
+
         const authHint = new Gtk.Label({
-            label: 'If usage fails to load, run: gh auth login --hostname github.com',
+            label: 'Leave token empty to use gh auth. The token/account must be able to read /copilot_internal/user.',
             xalign: 0,
             wrap: true,
             css_classes: ['dim-label', 'caption'],

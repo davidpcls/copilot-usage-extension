@@ -2,7 +2,7 @@
   "name": "Copilot Usage",
   "description": "Display GitHub Copilot usage in the top panel. This extension is not affiliated, funded, or in any way associated with GitHub.",
   "uuid": "copilot-usage@davidpcls",
-  "shell-version": ["46", "47", "48", "49", "50"],
+  "shell-version": ["45", "46", "47", "48", "49", "50", "51"],
   "url": "https://github.com/davidpcls/copilot-gnome-extension",
   "settings-schema": "org.gnome.shell.extensions.copilot-usage",
   "donations": {
